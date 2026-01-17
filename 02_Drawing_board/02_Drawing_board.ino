@@ -27,14 +27,15 @@ void Arduino_IIC_Touch_Interrupt(void) {
 #define SYS_EN_GPIO 41
 #define SYS_OUT_GPIO 40
 
-// Define power states
-#define POWER_OFF 0
-#define POWER_ON 1
+// Variables for button press detection
+uint8_t key_long_press_cnt = 0;
 
-// Variables for power state and button handling
-uint8_t powerState = POWER_OFF;
-uint8_t keyLongPressCnt = 0;
-bool keyReleased = true;
+// Variables to store the last touch coordinates
+static int32_t lastTouchX = -1, lastTouchY = -1;
+
+// Variables for power state management
+bool powerState = true; // true = ON, false = OFF
+bool keyReleased = true; // Track if the button has been released
 
 void setup() {
   USBSerial.begin(115200);
@@ -74,9 +75,6 @@ void setup() {
   pinMode(SYS_OUT_GPIO, INPUT_PULLUP);
 }
 
-// Variables to store the last touch coordinates
-static int32_t lastTouchX = -1, lastTouchY = -1;
-
 void loop() {
   int32_t touchX = CST816T->IIC_Read_Device_Value(CST816T->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_X);
   int32_t touchY = CST816T->IIC_Read_Device_Value(CST816T->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_Y);
@@ -85,8 +83,10 @@ void loop() {
 
   if (touchX > 20 && touchY > 20) {
     if (lastTouchX != -1 && lastTouchY != -1) {
-      // Draw a line between the last touch point and the current touch point
+      // Draw a thicker line between the last touch point and the current touch point
       gfx->drawLine(lastTouchX, lastTouchY, touchX, touchY, BLUE);
+      gfx->fillCircle(lastTouchX, lastTouchY, 5, BLUE); // Add thickness to the start of the line
+      gfx->fillCircle(touchX, touchY, 5, BLUE); // Add thickness to the end of the line
     }
     // Update the last touch coordinates
     lastTouchX = touchX;
@@ -97,31 +97,22 @@ void loop() {
     lastTouchY = -1;
   }
 
-  // Read button state
-  bool isButtonPressed = (digitalRead(SYS_OUT_GPIO) == LOW);
-
-  if (isButtonPressed) {
+  // Power button logic
+  if (digitalRead(SYS_OUT_GPIO) == LOW) { // Button is pressed
     if (keyReleased) {
-      keyLongPressCnt++;
+      key_long_press_cnt++;
     }
   } else {
-    keyLongPressCnt = 0;
+    key_long_press_cnt = 0;
     keyReleased = true; // Reset when button is released
   }
 
-  // Handle long press for power toggle
-  if (keyLongPressCnt > 20 && keyReleased) { // Long press detected
-    if (powerState == POWER_OFF) {
-      digitalWrite(SYS_EN_GPIO, HIGH); // Turn on power
-      digitalWrite(LCD_BL, HIGH);      // Turn on backlight
-      powerState = POWER_ON;
-    } else if (powerState == POWER_ON) {
-      digitalWrite(SYS_EN_GPIO, LOW); // Turn off power
-      digitalWrite(LCD_BL, LOW);      // Turn off backlight
-      powerState = POWER_OFF;
-    }
+  if (key_long_press_cnt > 50 && keyReleased) { // Long press detected (5 seconds)
+    powerState = !powerState; // Toggle power state
+    digitalWrite(SYS_EN_GPIO, powerState ? HIGH : LOW); // Update power state
+    digitalWrite(LCD_BL, powerState ? HIGH : LOW); // Update backlight state
     keyReleased = false; // Wait for button release
   }
 
-  delay(10); // Short delay for button handling
+  delay(10); // Reduce delay to improve touch responsiveness
 }
