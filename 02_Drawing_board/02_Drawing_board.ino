@@ -27,8 +27,14 @@ void Arduino_IIC_Touch_Interrupt(void) {
 #define SYS_EN_GPIO 41
 #define SYS_OUT_GPIO 40
 
-// Variables for button press detection
-uint8_t key_long_press_cnt = 0;
+// Define power states
+#define POWER_OFF 0
+#define POWER_ON 1
+
+// Variables for power state and button handling
+uint8_t powerState = POWER_OFF;
+uint8_t keyLongPressCnt = 0;
+bool keyReleased = true;
 
 void setup() {
   USBSerial.begin(115200);
@@ -68,27 +74,54 @@ void setup() {
   pinMode(SYS_OUT_GPIO, INPUT_PULLUP);
 }
 
+// Variables to store the last touch coordinates
+static int32_t lastTouchX = -1, lastTouchY = -1;
+
 void loop() {
   int32_t touchX = CST816T->IIC_Read_Device_Value(CST816T->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_X);
   int32_t touchY = CST816T->IIC_Read_Device_Value(CST816T->Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_Y);
 
   USBSerial.printf("Touch X:%d Y:%d\n", touchX, touchY);
+
   if (touchX > 20 && touchY > 20) {
-    gfx->fillCircle(touchX, touchY, 3, BLUE);
-  }
-
-  // Button press detection logic
-  if (digitalRead(SYS_OUT_GPIO) == LOW) {
-    key_long_press_cnt++;
+    if (lastTouchX != -1 && lastTouchY != -1) {
+      // Draw a line between the last touch point and the current touch point
+      gfx->drawLine(lastTouchX, lastTouchY, touchX, touchY, BLUE);
+    }
+    // Update the last touch coordinates
+    lastTouchX = touchX;
+    lastTouchY = touchY;
   } else {
-    key_long_press_cnt = 0;
+    // Reset the last touch coordinates if no valid touch is detected
+    lastTouchX = -1;
+    lastTouchY = -1;
   }
 
-  // If button is pressed for more than 2 seconds (20 iterations of 100ms)
-  if (key_long_press_cnt > 20) {
-    digitalWrite(SYS_EN_GPIO, LOW); // Disable power
-    digitalWrite(LCD_BL, LOW);      // Turn off backlight
+  // Read button state
+  bool isButtonPressed = (digitalRead(SYS_OUT_GPIO) == LOW);
+
+  if (isButtonPressed) {
+    if (keyReleased) {
+      keyLongPressCnt++;
+    }
+  } else {
+    keyLongPressCnt = 0;
+    keyReleased = true; // Reset when button is released
   }
 
-  delay(100); // 100ms delay for button press detection
+  // Handle long press for power toggle
+  if (keyLongPressCnt > 20 && keyReleased) { // Long press detected
+    if (powerState == POWER_OFF) {
+      digitalWrite(SYS_EN_GPIO, HIGH); // Turn on power
+      digitalWrite(LCD_BL, HIGH);      // Turn on backlight
+      powerState = POWER_ON;
+    } else if (powerState == POWER_ON) {
+      digitalWrite(SYS_EN_GPIO, LOW); // Turn off power
+      digitalWrite(LCD_BL, LOW);      // Turn off backlight
+      powerState = POWER_OFF;
+    }
+    keyReleased = false; // Wait for button release
+  }
+
+  delay(10); // Short delay for button handling
 }
